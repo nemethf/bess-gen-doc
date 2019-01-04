@@ -287,6 +287,9 @@ def write_dummy_module():
                     break
                 f.write(line.replace('//', '#'))
         f.write("\n\n")
+        f.write("from pybess.module import Module\n")
+        f.write("from pybess.bess import BESS\n\n")
+        f.write("bess = BESS()\n\n")
         for info in db['mclass']:
             class_name = info['name']
             cmd_arg = '%s%s' % (class_name, 'Arg')
@@ -300,7 +303,7 @@ def write_dummy_module():
                 doc.append('Example usage:\n  %s' %
                            '\n  '.join(info['examples']))
 
-            f.write('class %s():\n' % class_name)
+            f.write('class %s(Module):\n' % class_name)
             doc = [d for d in doc if d]
             if doc:
                 doc = indent('\n\n'.join(doc), 2)
