@@ -37,11 +37,18 @@ Generate documentation for bess.
 import argparse
 import inspect
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
+
+import logging
+logger = logging.getLogger('root')
+FORMAT = "%(filename)s:%(lineno)s %(funcName)s %(message)s"
+logging.basicConfig(format=FORMAT)
+logger.setLevel(logging.ERROR)
 
 wdir = Path(__file__).parent
 bess_dir = wdir / 'bess'
@@ -174,6 +181,7 @@ def find_def(class_name, func_name, msg_name):
     return loc
 
 def find_usage_exampe(class_name):
+    logger.debug('class_name=%s', class_name)
     # grep -Horn -m 1 '\bSink(' bessctl/conf/samples
     if not re.match(r'\w+', class_name):
         return ""
@@ -338,5 +346,8 @@ if __name__ == '__main__':
     parser.description = inspect.getdoc(inspect.getmodule(main))
     parser.add_argument('--skip', '-s', type=int, default=0, metavar='S',
                         help="Skip the first S steps.")
+    parser.add_argument('--verbose', '-v', action='store_true')
     args = parser.parse_args()
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
     main(args)
