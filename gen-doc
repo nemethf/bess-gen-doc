@@ -54,6 +54,16 @@ wdir = Path(__file__).parent
 bess_dir = wdir / 'bess'
 db = None
 
+class FileWithLineNumber(object):
+    def __init__(self, f):
+        self.f = f
+        self.line = 0
+
+    def write(self, str):
+        self.line += str.count("\n")
+        self.f.write(str)
+
+
 def check_call(cmd, **kw):
     "Like subprocess.check_call, but args can be Path objects as well."
     if type(cmd) == list:
@@ -155,19 +165,15 @@ def get_gdb_info(member_func):
         line = gdb_proc.stdout.readline().decode('utf-8').strip()
         response += line
     if response.endswith('not defined.'):
-        return ""
+        return None
     m = re.match(r'.gdb. Line (\d+) of "([^"]+)"', response)
     if m:
-        lineno = m.group(1)
-        filename = m.group(2)
-        if not Path(filename).is_absolute():
-            filename = '$BESS/core/' + filename
-        return "%s:%s" % (filename, lineno)
+        return {'file': 'core/' + m.group(2), 'line': int(m.group(1))}
 
     raise ValueError('Unknown gdb response: %s' % response)
 
 def find_def(class_name, func_name, msg_name):
-    loc = ''
+    loc = None
     m = re.search('(\w+)Command(\w+)(Arg)', msg_name)
     if m:
         loc = get_gdb_info("%s::%s" % (m.group(1), m.group(2)))
@@ -184,7 +190,7 @@ def find_usage_exampe(class_name):
     logger.debug('class_name=%s', class_name)
     # grep -Horn -m 1 '\bSink(' bessctl/conf/samples
     if not re.match(r'\w+', class_name):
-        return ""
+        return []
     location = []
     cmd = ['grep', '-Hornm', '1', '\\b%s(' % class_name, 'bessctl/conf/samples']
     try:
@@ -192,12 +198,13 @@ def find_usage_exampe(class_name):
     except subprocess.CalledProcessError as e:
         if e.returncode == 1:
             # no matches found
-            return ""
+            return []
         raise e
     for line in output.decode('utf-8').strip().split('\n'):
         parts = line.split(":")
-        location.append("$BESS/%s:%s" % (parts[0], parts[1]))
-    return location
+        location.append({'file': parts[0], 'line': int(parts[1])})
+    return sorted(location, key=lambda l: (l['file'], l['line']))
+
 
 def write_combined_db():
     with (wdir / 'protoc-gen-doc' / 'bess-protobuf.json').open() as f:
@@ -230,9 +237,7 @@ def write_combined_db():
         'mclass': minfo,
     }
     (wdir / 'out').mkdir(exist_ok=True)
-    db_file = wdir / 'out' / 'db.json'
-    with db_file.open('w') as f:
-        json.dump(db, f, indent=2, sort_keys=True, separators=(',', ': '))
+    write_db()
     return db
 
 def indent(string, columns):
@@ -240,6 +245,12 @@ def indent(string, columns):
     ret = [' ' * columns + line if len(line)>0 else line for line in ret]
     ret = '\n'.join(ret)
     return ret
+
+def conv_loc(location):
+    filename = location['file']
+    if not Path(filename).is_absolute():
+        filename = '$BESS/' + filename
+    return '%s:%s' % (filename, location['line'])
 
 def write_def(f, msg, class_name, cmd):
     fields = []
@@ -262,11 +273,12 @@ def write_def(f, msg, class_name, cmd):
         doc.append(":return: %s" % m['description'])
         # TODO: print "fileds" here as well
     if cmd.get('definition'):
-        doc.append('Definition:\n  %s' % cmd['definition'])
+        doc.append('Definition:\n  %s' % conv_loc(cmd['definition']))
     if doc:
         doc = [d for d in doc if d]
         doc = '\n"""\n%s\n"""' % '\n\n'.join(doc)
         doc = indent(doc, 4)
+    cmd['line'] = f.line + 1
     f.write('  def %s(%s):%s\n    pass\n\n' % (
         cmd['cmd'], args, doc))
 
@@ -279,11 +291,18 @@ def load_db():
         db = json.load(f)
     return db
 
+def write_db():
+    logger.debug('.')
+    db_file = wdir / 'out' / 'db.json'
+    with db_file.open('w') as f:
+        json.dump(db, f, indent=2, sort_keys=True, separators=(',', ': '))
+
 def write_dummy_module():
     db = load_db()
 
     msg = db['msg']
-    with (wdir / 'mclass.py').open('w') as f:
+    with (wdir / 'mclass.py').open('w') as fobj:
+        f = FileWithLineNumber(fobj)
         cfile = 'bess/protobuf/module_msg.proto'
         f.write("# This file is auto-genereated by bess-gen-doc.\n")
         f.write("# See https://github.com/nemethf/bess-gen-doc\n")
@@ -306,12 +325,13 @@ def write_dummy_module():
             if class_doc:
                 doc.append(class_doc['description'])
             if info['definition']:
-                doc.append('Definition:\n  %s' % info['definition'])
+                doc.append('Definition:\n  %s' % conv_loc(info['definition']))
             if info['examples']:
-                doc.append('Example usage:\n  %s' %
-                           '\n  '.join(info['examples']))
+                ex = [conv_loc(loc) for loc in info['examples']]
+                doc.append('Example usage:\n  %s' % '\n  '.join(ex))
 
             f.write('class %s(Module):\n' % class_name)
+            info['line'] = f.line
             doc = [d for d in doc if d]
             if doc:
                 doc = indent('\n\n'.join(doc), 2)
@@ -327,6 +347,7 @@ def write_dummy_module():
             for cmd in info['cmds']:
                 write_def(f, msg, class_name, cmd)
             f.write('\n')
+    write_db()
 
 def main(args):
     steps = [
