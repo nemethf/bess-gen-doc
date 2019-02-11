@@ -205,6 +205,21 @@ def find_usage_exampe(class_name):
         location.append({'file': parts[0], 'line': int(parts[1])})
     return sorted(location, key=lambda l: (l['file'], l['line']))
 
+def set_protobuf_lineno(messages):
+    "Modify each msg by adding the line number where msg was defined."
+    # Ideally, we should modify pseudomuto/protoc-gen-doc instead of
+    # this hack.
+    loc = {}
+    with (bess_dir / 'protobuf' / 'module_msg.proto').open() as f:
+        for lineno, line in enumerate(f, start=1):
+            m = re.match(r'^\s*message\s+(\S+)', line)
+            if not m:
+                continue
+            loc[m.group(1)] = lineno
+    for name, m in messages.items():
+        logger.debug('name: %s', name)
+        if name in loc:
+            m['line'] = loc[name]
 
 def write_combined_db():
     with (wdir / 'protoc-gen-doc' / 'bess-protobuf.json').open() as f:
@@ -218,6 +233,7 @@ def write_combined_db():
             continue
         for m in f['messages']:
             msg[m['name']] = m
+        set_protobuf_lineno(msg)
     for mclass in minfo:
         class_name = mclass['name']
         cmd_arg = '%s%s' % (class_name, 'Arg')
@@ -225,6 +241,7 @@ def write_combined_db():
         class_doc = msg.get(cmd_arg)
         mclass['definition'] = find_def(class_name, cmd_name, cmd_arg)
         mclass['examples'] = find_usage_exampe(class_name)
+        mclass['arg'] = cmd_arg
         for cmd in mclass['cmds']:
             m = msg.get(re.sub(r'Arg$', 'Response', cmd['arg']))
             if m:
