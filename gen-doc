@@ -289,12 +289,14 @@ def write_def(f, msg, class_name, cmd):
     if m:
         doc.append(":return: %s" % m['description'])
         # TODO: print "fileds" here as well
-    if cmd.get('definition'):
+    if ARGS.links and cmd.get('definition'):
         doc.append('Definition:\n  %s' % conv_loc(cmd['definition']))
+    doc = [d for d in doc if d]
     if doc:
-        doc = [d for d in doc if d]
         doc = '\n"""\n%s\n"""' % '\n\n'.join(doc)
         doc = indent(doc, 4)
+    else:
+        doc = ''
     cmd['line'] = f.line + 1
     f.write('  def %s(%s):%s\n    pass\n\n' % (
         cmd['cmd'], args, doc))
@@ -341,11 +343,11 @@ def write_dummy_module():
             class_doc = msg.get(cmd_arg)
             if class_doc:
                 doc.append(class_doc['description'])
-            if info['definition']:
+            if ARGS.links and info['definition']:
                 doc.append('Definition:\n  %s' % conv_loc(info['definition']))
-            if info['examples']:
-                ex = [conv_loc(loc) for loc in info['examples']]
-                doc.append('Example usage:\n  %s' % '\n  '.join(ex))
+            if ARGS.links and info['examples']:
+               ex = [conv_loc(loc) for loc in info['examples']]
+               doc.append('Example usage:\n  %s' % '\n  '.join(ex))
 
             f.write('class %s(Module):\n' % class_name)
             info['line'] = f.line
@@ -384,8 +386,10 @@ if __name__ == '__main__':
     parser.description = inspect.getdoc(inspect.getmodule(main))
     parser.add_argument('--skip', '-s', type=int, default=0, metavar='S',
                         help="Skip the first S steps.")
+    parser.add_argument('--links', '-l', action='store_true',
+                        help="Add 'links' to docstrings.")
     parser.add_argument('--verbose', '-v', action='store_true')
-    args = parser.parse_args()
-    if args.verbose:
+    ARGS = parser.parse_args()
+    if ARGS.verbose:
         logger.setLevel(logging.DEBUG)
-    main(args)
+    main(ARGS)
