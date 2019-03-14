@@ -377,15 +377,18 @@ def main(args):
         write_combined_db,
         write_dummy_module,
     ]
-    for step in steps[args.skip:]:
+    for i, step in enumerate(steps, start=1):
+        if i < args.start:
+            continue
+        logger.debug('Starting step %s: %s', i, step.__name__)
         step()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.description = inspect.getdoc(inspect.getmodule(main))
-    parser.add_argument('--skip', '-s', type=int, default=0, metavar='S',
-                        help="Skip the first S steps.")
+    parser.add_argument('--start', '-s', type=int, default=1, metavar='S',
+                        help="Start at step S (while skipping previous steps).")
     parser.add_argument('--links', '-l', action='store_true',
                         help="Add 'links' to docstrings.")
     parser.add_argument('--verbose', '-v', action='store_true')
