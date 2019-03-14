@@ -35,6 +35,7 @@ Generate documentation for bess.
 #
 
 import argparse
+import functools
 import inspect
 import json
 import logging
@@ -142,22 +143,10 @@ def gen_mclass_info():
 def to_camel_case(snake_string):
     return snake_string.title().replace("_", "")
 
-gdb_proc = None
-def get_gdb_info(member_func):
+def get_gdb_info(gdb_proc, member_func):
     # Compile bess as: DEBUG=1 ./container_build.py
     #
     # (gdb) info line DRR::SetQuantumSize
-    global gdb_proc
-    if gdb_proc is None:
-        gdb_proc = subprocess.Popen(['gdb', str(bess_dir / 'bin' / 'bessd')],
-                                    stdin=subprocess.PIPE,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT)
-        while True:
-            line = gdb_proc.stdout.readline().decode('utf-8')
-            # print(line.rstrip())
-            if line.startswith("Reading symbols from "):
-                break
     gdb_proc.stdin.write(('info line %s\n' % member_func).encode('utf-8'))
     gdb_proc.stdin.flush()
     response = ''
@@ -168,23 +157,74 @@ def get_gdb_info(member_func):
         return None
     m = re.match(r'.gdb. Line (\d+) of "([^"]+)"', response)
     if m:
-        return {'file': 'core/' + m.group(2), 'line': int(m.group(1))}
+        filename = m.group(2)
+        return {'file': conv_file(filename, 'core'), 'line': int(m.group(1))}
 
     raise ValueError('Unknown gdb response: %s' % response)
 
+@functools.lru_cache()
+def find_exec_files():
+    files = [bess_dir/'core'/'bessd']
+    files.extend((bess_dir/'core'/'modules').glob('*.so'))
+    return files
+
+@functools.lru_cache(maxsize=None)
+def find_gdb_proc(exec_file):
+    proc = subprocess.Popen(['gdb', str(exec_file)],
+                            stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+    while True:
+        line = proc.stdout.readline().decode('utf-8')
+        # print(line.rstrip())
+        if line.startswith("Reading symbols from "):
+            break
+    return proc
+
 def find_def(class_name, func_name, msg_name):
+    for exec_file in find_exec_files():
+        proc = find_gdb_proc(exec_file)
+        loc = find_def0(proc, class_name, func_name, msg_name)
+        if loc:
+            return loc
+    logger.warn('Definition not found for %s, %s, %s',
+                class_name, func_name, msg_name)
+    return None
+
+def find_def0(proc, class_name, func_name, msg_name):
     loc = None
     m = re.search('(\w+)Command(\w+)(Arg)', msg_name)
     if m:
-        loc = get_gdb_info("%s::%s" % (m.group(1), m.group(2)))
+        loc = get_gdb_info(proc, "%s::%s" % (m.group(1), m.group(2)))
     if m and not loc:
-        loc = get_gdb_info("%s::Command%s" % (m.group(1), m.group(2)))
+        loc = get_gdb_info(proc, "%s::Command%s" % (m.group(1), m.group(2)))
     if not loc:
-        loc = get_gdb_info("%s::%s" % (class_name, to_camel_case(func_name)))
+        loc = get_gdb_info(proc, "%s::%s" % (class_name, to_camel_case(func_name)))
     if not loc:
         funcName = to_camel_case(func_name)
-        loc = get_gdb_info("%s::Command%s" % (class_name, funcName))
+        loc = get_gdb_info(proc, "%s::Command%s" % (class_name, funcName))
     return loc
+
+@functools.lru_cache()
+def find_current_plugins():
+    "Return list of existing plugins."
+    # Adapted from from container_build.py
+    result = []
+    try:
+        for line in (bess_dir/'core'/'extra.mk').open().readlines():
+            match = re.match(r'PLUGINS \+= (.*)', line)
+            if match:
+                result.append(match.group(1))
+    except (OSError, IOError):
+        pass
+    return result
+
+@functools.lru_cache()
+def find_sample_dirs():
+    dirs = ['bessctl/conf/samples']
+    for d in find_current_plugins():
+        dirs.append(os.path.join(d, 'bessctl_conf'))
+    return dirs
 
 def find_usage_exampe(class_name):
     logger.debug('class_name=%s', class_name)
@@ -192,17 +232,19 @@ def find_usage_exampe(class_name):
     if not re.match(r'\w+', class_name):
         return []
     location = []
-    cmd = ['grep', '-Hornm', '1', '\\b%s(' % class_name, 'bessctl/conf/samples']
-    try:
-        output = subprocess.check_output(cmd, cwd=str(bess_dir))
-    except subprocess.CalledProcessError as e:
-        if e.returncode == 1:
-            # no matches found
-            return []
-        raise e
-    for line in output.decode('utf-8').strip().split('\n'):
-        parts = line.split(":")
-        location.append({'file': parts[0], 'line': int(parts[1])})
+    for sample_dir in find_sample_dirs():
+        cmd = ['grep', '-Hornm', '1', '\\b%s(' % class_name, str(sample_dir)]
+        try:
+            output = subprocess.check_output(cmd, cwd=str(bess_dir))
+        except subprocess.CalledProcessError as e:
+            if e.returncode == 1:
+                # no matches found
+                continue
+            raise e
+        for line in output.decode('utf-8').strip().split('\n'):
+            parts = line.split(":")
+            location.append({'file': conv_file(parts[0]),
+                             'line': int(parts[1])})
     return sorted(location, key=lambda l: (l['file'], l['line']))
 
 def set_protobuf_lineno(messages):
@@ -267,6 +309,18 @@ def conv_loc(location):
     if not Path(filename).is_absolute():
         filename = '$BESS/' + filename
     return '%s:%s' % (filename, location['line'])
+
+def conv_file(filename, rel_prefix=''):
+    if os.path.isabs(filename):
+        relative = bess_dir/rel_prefix
+        abs_filename = os.path.abspath(filename)
+        if relative.resolve().parts[:2] != Path(abs_filename).parts[:2]:
+            return abs_filename
+        else:
+            return os.path.relpath(filename, str(bess_dir/rel_prefix))
+    if rel_prefix:
+        return os.path.join(rel_prefix, filename)
+    return filename
 
 def write_def(f, msg, class_name, cmd):
     fields = []
