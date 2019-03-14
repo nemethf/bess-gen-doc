@@ -1,6 +1,5 @@
 /bess
-/mclass.py
-/mclass/bessd-mclass.json
 /out
-/protoc-gen-doc/bess-protobuf.json
+/out-mclass
+/out-protoc-gen-doc
 /safe_container_build.py

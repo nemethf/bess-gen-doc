@@ -106,7 +106,7 @@ def compile_bess():
 
 def run_protoc_gen_doc():
     image = 'pseudomuto/protoc-gen-doc'
-    outdir = wdir / 'protoc-gen-doc'
+    outdir = wdir / 'out-protoc-gen-doc'
     outfile = 'bess-protobuf.json'
     outdir.mkdir(exist_ok=True)
     cmd = ['docker', 'run', '--rm',
@@ -118,7 +118,7 @@ def run_protoc_gen_doc():
 
 def gen_mclass_info():
     image = 'gen-bess-doc-mclass'
-    outdir = wdir / 'mclass'
+    outdir = wdir / 'out-mclass'
     src_dir = wdir / 'save-mclass-info'
     outdir.mkdir(exist_ok=True)
 
@@ -222,9 +222,9 @@ def set_protobuf_lineno(messages):
             m['line'] = loc[name]
 
 def write_combined_db():
-    with (wdir / 'protoc-gen-doc' / 'bess-protobuf.json').open() as f:
+    with (wdir / 'out-protoc-gen-doc' / 'bess-protobuf.json').open() as f:
         protobuf = json.load(f)
-    with (wdir / 'mclass' / 'bessd-mclass.json').open() as f:
+    with (wdir / 'out-mclass' / 'bessd-mclass.json').open() as f:
         minfo = json.load(f)
 
     msg = {}
@@ -253,7 +253,6 @@ def write_combined_db():
         'msg': msg,
         'mclass': minfo,
     }
-    (wdir / 'out').mkdir(exist_ok=True)
     write_db()
     return db
 
@@ -312,6 +311,7 @@ def load_db():
 
 def write_db():
     logger.debug('.')
+    (wdir / 'out').mkdir(exist_ok=True)
     db_file = wdir / 'out' / 'db.json'
     with db_file.open('w') as f:
         json.dump(db, f, indent=2, sort_keys=True, separators=(',', ': '))
@@ -320,7 +320,7 @@ def write_dummy_module():
     db = load_db()
 
     msg = db['msg']
-    with (wdir / 'mclass.py').open('w') as fobj:
+    with (wdir / 'out' / 'mclass.py').open('w') as fobj:
         f = FileWithLineNumber(fobj)
         cfile = 'bess/protobuf/module_msg.proto'
         f.write("# This file is auto-genereated by bess-gen-doc.\n")
@@ -366,7 +366,6 @@ def write_dummy_module():
             for cmd in info['cmds']:
                 write_def(f, msg, class_name, cmd)
             f.write('\n')
-    write_db()
 
 def main(args):
     steps = [
