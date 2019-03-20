@@ -333,6 +333,14 @@ def create_combined_db():
             if m and r_arg != 'bess.pb.EmptyResponse':
                 cmd['return'] = r_arg
             cmd['definition'] = find_def(class_name, cmd['cmd'], cmd['arg'])
+            if cmd['arg'] == 'EmptyArg':
+                # Sometimes, if a command has no arguments, there is a
+                # corresponding protobuf message for documentation
+                # purpuses only. (It is never used anywhere.)
+                postfix = 'Command%sArg' % to_camel_case(cmd['cmd'])
+                doc_msg = re.sub(r'Arg$', postfix, class_msg['fullName'])
+                if msg.get(doc_msg):
+                    cmd['doc_msg'] = doc_msg
 
     global db
     db = {
@@ -375,6 +383,8 @@ def write_def(f, msg, msg_short, class_name, cmd):
     if m:
         doc.append(m['description'])
         fields += m['fields']
+    if 'doc_msg' in cmd:
+        doc.append(msg[cmd['doc_msg']]['description'])
     args_doc = []
     for field in fields:
         args += ', %s=None' % field['name']
