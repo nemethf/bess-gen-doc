@@ -321,6 +321,12 @@ def create_combined_db():
     for mclass in minfo:
         class_name = mclass['name']
         cmd_arg = '%s%s' % (class_name, 'Arg')
+        if cmd_arg not in msg_short:
+            # MPLSPopArg -> MplsPopArg,
+            # based on https://stackoverflow.com/a/1176023
+            s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', cmd_arg)
+            s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1).lower()
+            cmd_arg = to_camel_case(s2)
         cmd_name = '__init__'
         class_msg = msg_short.get(cmd_arg)
         mclass['definition'] = find_def(class_name, cmd_name, cmd_arg)
