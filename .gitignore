@@ -1,5 +1,3 @@
 /bess
-/out
-/out-mclass
-/out-protoc-gen-doc
+/out*
 /safe_container_build.py
