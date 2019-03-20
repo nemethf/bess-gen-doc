@@ -347,7 +347,9 @@ def create_combined_db():
         'msg': msg,
         'mclass': minfo,
     }
-    write_db()
+    # Write to a temp file, so next steps cloud run even if this step
+    # does not run.
+    write_db('-combined')
     return db
 
 def indent(string, columns):
@@ -414,14 +416,68 @@ def load_db():
     if db:
         return db
 
-    with (wdir / 'out' / 'db.json').open() as f:
+    with (wdir / 'out-combined' / 'db.json').open() as f:
         db = json.load(f)
     return db
 
-def write_db():
-    logger.debug('.')
-    (wdir / 'out').mkdir(exist_ok=True)
-    db_file = wdir / 'out' / 'db.json'
+def check_and_prune_db():
+    # bessctl uses short protobuf names, so those should be unique.
+    # However, we use full names, because short return types and field
+    # types are not necessarily unique.
+    used = {}
+    reported = {}
+    def mark_used(used, name, full=False):
+        if name is None:
+            return
+        if not full:
+            try:
+                name = msg_short[name]['fullName']
+            except KeyError:
+                logger.debug('no fullName for %s', name)
+                return
+        if name not in db['msg']:
+            if name not in reported:
+                logger.debug('unknown type: %s', name)
+            reported[name] = True
+            return
+        if used.get(name):
+            return
+        used[name] = True
+        for field in db['msg'][name].get("fields"):
+            mark_used(used, field['fullType'], True)
+
+    msg_short = {}
+    for m in db['msg'].values():
+        if m['name'] in msg_short:
+            logger.warn('Short name is not unique: %s, %s',
+                        msg_short[m['name']]['fullName'], m['fullName'])
+        msg_short[m['name']] = m
+
+    for mclass in db['mclass']:
+        methods = [mclass] + mclass['cmds']
+        for method in methods:
+            mark_used(used, method['arg'])
+            mark_used(used, method.get('return'), True)
+            mark_used(used, method.get("doc_msg"), True)
+
+    to_delete = []
+    for m in db['msg'].values():
+        if m['fullName'] not in used:
+            to_delete.append(m['fullName'])
+    for fullName in to_delete:
+        logger.debug('delete unused msg: %s', fullName)
+        del db['msg'][fullName]
+
+def write_db(dir_suffix=''):
+    outdir = 'out%s' % dir_suffix
+    logger.debug('%s', outdir)
+    (wdir / outdir).mkdir(exist_ok=True)
+    db_file = wdir / outdir / 'db.json'
+
+    if not dir_suffix:
+        msg_short = { m['name']: m for m in db['msg'].values()}
+        db['msg'] = msg_short
+
     with db_file.open('w') as f:
         json.dump(db, f, indent=2, sort_keys=True, separators=(',', ': '))
 
@@ -477,6 +533,7 @@ def write_dummy_module():
             for cmd in info['cmds']:
                 write_def(f, msg, msg_short, class_name, cmd)
             f.write('\n')
+    check_and_prune_db()
     write_db()
 
 def main(args):
