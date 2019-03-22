@@ -37,6 +37,7 @@ Generate documentation for bess.
 import argparse
 import collections
 import functools
+import gzip
 import inspect
 import json
 import logging
@@ -355,7 +356,7 @@ def create_combined_db():
     }
     # Write to a temp file, so next steps cloud run even if this step
     # does not run.
-    write_db('-combined')
+    db_write('-combined')
     return db
 
 def indent(string, columns):
@@ -417,7 +418,7 @@ def write_def(f, msg, msg_short, class_name, cmd):
     f.write('  def %s(%s):%s\n    pass\n\n' % (
         cmd['cmd'], args, doc))
 
-def load_db():
+def db_load():
     global db
     if db:
         return db
@@ -426,7 +427,7 @@ def load_db():
         db = json.load(f)
     return db
 
-def check_and_prune_db():
+def db_check_and_prune():
     # bessctl uses short protobuf names, so those should be unique.
     # However, we use full names, because short return types and field
     # types are not necessarily unique.
@@ -474,21 +475,81 @@ def check_and_prune_db():
         logger.debug('delete unused msg: %s', fullName)
         del db['msg'][fullName]
 
-def write_db(dir_suffix=''):
+def db_create_minimal(db):
+    fields = [
+        'help',
+        'description',
+        'defaultValue',
+        'doc_msg',
+        'extensions',
+        'fields',
+        'hasExtensions',
+        'hasFields',
+        'label',
+        'longName',
+    ]
+    def rm_fields(obj):
+        if type(obj) == list:
+            for i in obj:
+                rm_fields(i)
+            return
+        if type(obj) == dict:
+            for f in fields:
+                obj.pop(f, None)
+            for v in obj.values():
+                rm_fields(v)
+            return
+        return
+
+    f_idx = {'mclass.py': 0}
+    def index_files(obj):
+        if type(obj) == list:
+            for i in obj:
+                index_files(i)
+            return
+        if type(obj) == dict:
+            for v in obj.values():
+                index_files(v)
+            if 'file' in obj:
+                if type(obj['file']) == str:
+                    idx = f_idx.get(obj['file'], len(f_idx))
+                    f_idx[obj['file']] = idx
+                    obj['file'] = idx
+            elif 'line' in obj:
+                obj['file'] = 0
+            return
+        return
+
+    rm_fields(db)
+    index_files(db)
+    db['files'] = {v: k for k, v in f_idx.items()}
+
+    return db
+
+def db_write(dir_suffix=''):
     outdir = 'out%s' % dir_suffix
     logger.debug('%s', outdir)
     (wdir / outdir).mkdir(exist_ok=True)
-    db_file = wdir / outdir / 'db.json'
+    db_file = wdir/outdir/'db.json'
+    db_minimal_file = wdir/outdir/'db.min.json.gz'
 
     if not dir_suffix:
-        msg_short = { m['name']: m for m in db['msg'].values()}
-        db['msg'] = msg_short
+        msg_list = [m for m in db['msg'].values()]
+        db['msg'] = msg_list
 
     with db_file.open('w') as f:
         json.dump(db, f, indent=2, sort_keys=True, separators=(',', ': '))
 
+    if dir_suffix:
+        return
+
+    # Check the result with: zcat db.min.json.gz|python3 -m json.tool
+    db_min = db_create_minimal(db)
+    with gzip.open(str(db_minimal_file), 'wt', encoding='utf8') as f:
+        json.dump(db_min, f, sort_keys=True, separators=(',', ':'))
+
 def write_dummy_module():
-    db = load_db()
+    db = db_load()
 
     msg = db['msg']
     msg_short = { m['name']: m for m in msg.values()}
@@ -539,8 +600,8 @@ def write_dummy_module():
             for cmd in info['cmds']:
                 write_def(f, msg, msg_short, class_name, cmd)
             f.write('\n')
-    check_and_prune_db()
-    write_db()
+    db_check_and_prune()
+    db_write()
 
 def main(args):
     steps = [
