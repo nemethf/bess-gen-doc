@@ -405,7 +405,7 @@ def write_def(f, msg, msg_short, class_name, cmd):
     m = msg.get(cmd.get('return'))
     if m:
         doc.append(":return: %s" % m['description'])
-        # TODO: print "fileds" here as well
+        # TODO: print "fields" here as well
     if ARGS.links and cmd.get('definition'):
         doc.append('Definition:\n  %s' % conv_loc(cmd['definition']))
     doc = [d for d in doc if d]
@@ -423,7 +423,7 @@ def db_load():
     if db:
         return db
 
-    with (wdir / 'out-combined' / 'db.json').open() as f:
+    with (wdir / 'out-combined' / 'mclass.json').open() as f:
         db = json.load(f)
     return db
 
@@ -501,7 +501,19 @@ def db_create_minimal(db):
             return
         return
 
-    f_idx = {'mclass.py': 0}
+    def collect_files(obj, files):
+        if type(obj) == list:
+            for i in obj:
+                collect_files(i, files)
+            return files
+        if type(obj) == dict:
+            for v in obj.values():
+                collect_files(v, files)
+            if 'file' in obj:
+                if type(obj['file']) == str and obj['file'] not in files:
+                    files.append(obj['file'])
+        return files
+
     def index_files(obj):
         if type(obj) == list:
             for i in obj:
@@ -512,15 +524,16 @@ def db_create_minimal(db):
                 index_files(v)
             if 'file' in obj:
                 if type(obj['file']) == str:
-                    idx = f_idx.get(obj['file'], len(f_idx))
-                    f_idx[obj['file']] = idx
-                    obj['file'] = idx
+                    obj['file'] = f_idx[obj['file']]
             elif 'line' in obj:
                 obj['file'] = 0
             return
         return
 
     rm_fields(db)
+    files = collect_files(db, [])
+    f_idx = {fname: i for i, fname in enumerate(sorted(files), start=1)}
+    f_idx['mclass.py'] = 0
     index_files(db)
     db['files'] = {v: k for k, v in f_idx.items()}
 
@@ -530,11 +543,11 @@ def db_write(dir_suffix=''):
     outdir = 'out%s' % dir_suffix
     logger.debug('%s', outdir)
     (wdir / outdir).mkdir(exist_ok=True)
-    db_file = wdir/outdir/'db.json'
-    db_minimal_file = wdir/outdir/'db.min.json.gz'
+    db_file = wdir/outdir/'mclass.json'
+    db_minimal_file = wdir/outdir/'mclass.min.json.gz'
 
     if not dir_suffix:
-        msg_list = [m for m in db['msg'].values()]
+        msg_list = [m for _, m in sorted(db['msg'].items())]
         db['msg'] = msg_list
 
     with db_file.open('w') as f:
@@ -543,7 +556,7 @@ def db_write(dir_suffix=''):
     if dir_suffix:
         return
 
-    # Check the result with: zcat db.min.json.gz|python3 -m json.tool
+    # Check the result with: zcat mclass.min.json.gz|python3 -m json.tool
     db_min = db_create_minimal(db)
     with gzip.open(str(db_minimal_file), 'wt', encoding='utf8') as f:
         json.dump(db_min, f, sort_keys=True, separators=(',', ':'))
