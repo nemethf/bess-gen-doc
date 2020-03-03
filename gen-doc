@@ -129,6 +129,7 @@ def run_protoc_gen_doc1(id=None, plugin=None):
            '-v', '%s:/out' % outdir.resolve(),
            '-v', '%s:/protos:ro' % indir.resolve(),
            image,
+           # '--include_source_info',
            '--doc_opt=json,%s' % outfile]
     check_call(cmd, cwd=wdir)
 
@@ -337,8 +338,17 @@ def create_combined_db():
             r_full = msg_short[cmd['arg']]['fullName']
             r_arg = re.sub(r'Arg$', 'Response', r_full)
             m = msg.get(r_arg)
-            if m and r_arg != 'bess.pb.EmptyResponse':
+            r_empty_full = 'bess.pb.EmptyResponse'
+            if m and r_full.endswith('Arg') and r_arg != r_empty_full:
                 cmd['return'] = r_arg
+            elif cmd['cmd'].startswith('get_'):
+                set_cmd = cmd['cmd'].replace('get_', 'set_')
+                for scmd in mclass['cmds']:
+                    if scmd['cmd'] == set_cmd:
+                        r_full = msg_short[scmd['arg']]['fullName']
+                        m = msg.get(r_full)
+                        if m and scmd['arg'] != 'EmptyArg':
+                            cmd['return'] = r_full
             cmd['definition'] = find_def(class_name, cmd['cmd'], cmd['arg'])
             if cmd['arg'] == 'EmptyArg':
                 # Sometimes, if a command has no arguments, there is a
@@ -386,7 +396,7 @@ def conv_file(filename, rel_prefix=''):
 
 def write_def(f, msg, msg_short, class_name, cmd):
     fields = []
-    args = "self"
+    args = ["self"]
     m = msg_short.get(cmd['arg'])
     doc = []
     if m:
@@ -396,7 +406,13 @@ def write_def(f, msg, msg_short, class_name, cmd):
         doc.append(msg[cmd['doc_msg']]['description'])
     args_doc = []
     for field in fields:
-        args += ', %s=None' % field['name']
+        ftype = field['type']
+        if field['label'] == 'repeated':
+            ftype = 'List[%s]' % ftype
+        if ARGS.typing:
+            args.append('%s: %s = ...' % (field['name'], ftype))
+        else:
+            args.append('%s=None' % field['name'])
         if field.get('description'):
             args_doc.append(":param %s: %s" %
                             (field['name'], field['description']))
@@ -415,8 +431,14 @@ def write_def(f, msg, msg_short, class_name, cmd):
     else:
         doc = ''
     cmd['line'] = f.line + 1
-    f.write('  def %s(%s):%s\n    pass\n\n' % (
-        cmd['cmd'], args, doc))
+    if ARGS.typing:
+        ret = msg.get(cmd.get('return', ''), {}).get('name', '')
+        ret = ret and " -> " + ret
+        f.write("  def %s(\n    %s" % (cmd['cmd'], ",\n    ".join(args)))
+        f.write("\n    )%s:%s\n    ...\n\n" % (ret, doc))
+    else:
+        f.write('  def %s(%s):%s\n    pass\n\n' % (
+            cmd['cmd'], ", ".join(args), doc))
 
 def db_load():
     global db
@@ -456,8 +478,8 @@ def db_check_and_prune():
     msg_short = {}
     for m in db['msg'].values():
         if m['name'] in msg_short:
-            logger.warn('Short name is not unique: %s, %s',
-                        msg_short[m['name']]['fullName'], m['fullName'])
+            logger.warning('Short name is not unique: %s, %s',
+                           msg_short[m['name']]['fullName'], m['fullName'])
         msg_short[m['name']] = m
 
     for mclass in db['mclass']:
@@ -564,6 +586,21 @@ def db_write(dir_suffix=''):
 def write_dummy_module():
     db = db_load()
 
+    simple_types = {
+        'bytes': 'str',
+        'double': 'float',
+        'fixed32': 'int',
+        'fixed64': 'int',
+        'int32': 'int',
+        'int64': 'int',
+        'sfixed32': 'int',
+        'sfixed64': 'int',
+        'sint32': 'int',
+        'sint64': 'int',
+        'string': 'str',
+        'uint32': 'int',
+        'uint64': 'int',
+    }
     msg = db['msg']
     msg_short = { m['name']: m for m in msg.values()}
     (wdir / 'out').mkdir(exist_ok=True)
@@ -579,10 +616,33 @@ def write_dummy_module():
                 if not line.startswith('//'):
                     break
                 f.write(line.replace('//', '#'))
+        ignore = '# type: ignore'
         f.write("\n\n")
-        f.write("from pybess.module import Module\n")
-        f.write("from pybess.bess import BESS\n\n")
+        f.write("from pybess.module import Module as BessModule %s\n" % ignore)
+        f.write("from pybess.bess import BESS %s\n\n" % ignore)
         f.write("bess = BESS()\n\n")
+
+        if ARGS.typing:
+            f.write('from typing import List, Any\n')
+            f.write('from mypy_extensions import TypedDict\n\n')
+            for stype, pytype in sorted(simple_types.items()):
+                f.write("%s = %s\n" % (stype, pytype))
+            f.write("\n")
+
+            # TODO: use fullName in case of name clash (how?)
+            for m in msg_short.values():
+                f.write("class {name}(TypedDict):\n".format(**m))
+                for field in m['fields']:
+                    ftype = field['type']
+                    if field['name'] == 'class':
+                        field['name'] = 'klass' # ¯\_(ツ)_/¯
+                    if field['label'] == 'repeated':
+                        ftype = 'List[%s]' % ftype
+                    f.write("  {name}: {ftype}\n".format(ftype=ftype, **field))
+                if not m['fields']:
+                    f.write("  pass\n")
+                f.write("\n")
+
         for info in db['mclass']:
             class_name = info['name']
             cmd_arg = info['arg']
@@ -596,7 +656,7 @@ def write_dummy_module():
                ex = [conv_loc(loc) for loc in info['examples']]
                doc.append('Example usage:\n  %s' % '\n  '.join(ex))
 
-            f.write('class %s(Module):\n' % class_name)
+            f.write('class %s(BessModule):\n' % class_name)
             info['line'] = f.line
             doc = [d for d in doc if d]
             if doc:
@@ -636,9 +696,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.description = inspect.getdoc(inspect.getmodule(main))
     parser.add_argument('--start', '-s', type=int, default=1, metavar='S',
-                        help="Start at step S (while skipping previous steps).")
+                        help="start at step S (while skipping previous steps)")
     parser.add_argument('--links', '-l', action='store_true',
-                        help="Add 'links' to docstrings.")
+                        help="add 'links' to docstrings")
+    parser.add_argument('--typing', dest='typing', action='store_true',
+                        help=("include type annotations in the .py file"
+                              " (default)"))
+    parser.add_argument('--no-typing', dest='typing', action='store_false',
+                        help="don't include type annotations")
+    parser.set_defaults(typing=True)
     parser.add_argument('--verbose', '-v', action='store_true')
     ARGS = parser.parse_args()
     if ARGS.verbose:
