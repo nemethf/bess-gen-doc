@@ -16,7 +16,7 @@ this program generates documentation that
 1. Extract documentation from protobuf messages,
 1. Collect modules and their methods by running bessd in a container,
 1. Find method definitions by running gdb,
-1. Write a dummy module ([mclass.py](https://github.com/nemethf/bess-language-server/blob/develop/bessls/extra/mclass.py)).
+1. Write a dummy module ([mclass.py](https://github.com/nemethf/pyls-bess/blob/master/pyls_bess/bess_doc/mclass.py)).
 
 # Uninstall
 
@@ -30,4 +30,4 @@ $ docker image rm pseudomuto/protoc-gen-doc
 # Is it any good?
 
 At least the [bess language
-server](https://github.com/nemethf/bess-language-server) uses it.
+server](https://github.com/nemethf/pyls-bess) uses it.
