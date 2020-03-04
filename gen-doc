@@ -630,7 +630,7 @@ def write_dummy_module():
             f.write("\n")
 
             # TODO: use fullName in case of name clash (how?)
-            for m in msg_short.values():
+            for m in sorted(msg_short.values(), key=lambda m: m['name']):
                 f.write("class {name}(TypedDict):\n".format(**m))
                 for field in m['fields']:
                     ftype = field['type']
