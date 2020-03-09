@@ -404,6 +404,8 @@ def write_def(f, msg, msg_short, class_name, cmd):
         fields += m['fields']
     if 'doc_msg' in cmd:
         doc.append(msg[cmd['doc_msg']]['description'])
+    if cmd['cmd'] == '__init__':
+        fields.append({'name': 'name', 'type': 'str', 'label': None})
     args_doc = []
     for field in fields:
         ftype = field['type']
