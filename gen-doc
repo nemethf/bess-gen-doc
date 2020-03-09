@@ -408,13 +408,18 @@ def write_def(f, msg, msg_short, class_name, cmd):
         fields.append({'name': 'name', 'type': 'str', 'label': None})
     args_doc = []
     for field in fields:
-        ftype = field['type']
+        fname = field['name']
+        try:
+            fullType = field['fullType']
+            ftype = db['msg'][fullType]['uniq_short_name']
+        except KeyError:
+            ftype = field['type']
         if field['label'] == 'repeated':
             ftype = 'List[%s]' % ftype
         if ARGS.typing:
-            args.append('%s: %s = ...' % (field['name'], ftype))
+            args.append('%s: %s = ...' % (fname, ftype))
         else:
-            args.append('%s=None' % field['name'])
+            args.append('%s=None' % fname)
         if field.get('description'):
             args_doc.append(":param %s: %s" %
                             (field['name'], field['description']))
@@ -441,6 +446,10 @@ def write_def(f, msg, msg_short, class_name, cmd):
     else:
         f.write('  def %s(%s):%s\n    pass\n\n' % (
             cmd['cmd'], ", ".join(args), doc))
+
+def camelCase(name):
+    "Return CamelCase version of prtobuf field NAME."
+    return name.replace('.', '')
 
 def db_load():
     global db
@@ -480,8 +489,11 @@ def db_check_and_prune():
     msg_short = {}
     for m in db['msg'].values():
         if m['name'] in msg_short:
+            similar = msg_short[m['name']]
             logger.warning('Short name is not unique: %s, %s',
-                           msg_short[m['name']]['fullName'], m['fullName'])
+                           similar['fullName'], m['fullName'])
+            similar['uniq_short_name'] = camelCase(similar['longName'])
+            m['uniq_short_name'] = camelCase(m['longName'])
         msg_short[m['name']] = m
 
     for obj in db['globals']:
@@ -501,16 +513,18 @@ def db_check_and_prune():
 
 def db_create_minimal(db):
     fields = [
-        'help',
-        'description',
         'defaultValue',
+        'description',
         'doc_msg',
         'extensions',
         'fields',
         'hasExtensions',
         'hasFields',
+        'help',
         'label',
         'longName',
+        'parent_cls',
+        'uniq_short_name',
     ]
     def rm_fields(obj):
         if type(obj) == list:
@@ -585,8 +599,27 @@ def db_write(dir_suffix=''):
     with gzip.open(str(db_minimal_file), 'wt', encoding='utf8') as f:
         json.dump(db_min, f, sort_keys=True, separators=(',', ':'))
 
+def set_parent_class(msg):
+    cls = 'TypedDict, total=False'
+    # pseudomuto/protoc-gen-doc doesn't support 'oneof':
+    # https://github.com/pseudomuto/protoc-gen-doc/issues/333
+    # https://github.com/pseudomuto/protoc-gen-doc/pull/336
+    # https://github.com/pseudomuto/protoc-gen-doc/pull/362
+    msg_with_oneOf = [
+        'Field',                # util_msg.proto
+        'FieldData',            # util_msg.proto
+        'EncapField',
+        'Attribute',
+        'SplitArg',
+    ]
+    #if msg['longName'] in msg_with_oneOf:
+    #    TODO
+    msg['parent_cls'] = cls
+
 def write_dummy_module():
+    global db
     db = db_load()
+    db_check_and_prune()
 
     simple_types = {
         'bytes': 'str',
@@ -604,7 +637,7 @@ def write_dummy_module():
         'uint64': 'int',
     }
     msg = db['msg']
-    msg_short = { m['name']: m for m in msg.values()}
+    msg_short = { m.get('uniq_short_name', m['name']): m for m in msg.values()}
     (wdir / 'out').mkdir(exist_ok=True)
     with (wdir / 'out' / 'globals.py').open('w') as fobj:
         f = FileWithLineNumber(fobj)
@@ -631,14 +664,16 @@ def write_dummy_module():
             for stype, pytype in sorted(simple_types.items()):
                 f.write("%s = %s\n" % (stype, pytype))
             f.write("\n")
-
-            # TODO: use fullName in case of name clash (how?)
             for m in sorted(msg_short.values(), key=lambda m: m['name']):
-                f.write("class {name}(TypedDict):\n".format(**m))
+                set_parent_class(m)
+                m['uniq_short_name'] = m.get('uniq_short_name', m['name'])
+                f.write("class {uniq_short_name}({parent_cls}):\n".format(**m))
                 for field in m['fields']:
                     ftype = field['type']
                     if field['name'] == 'class':
-                        field['name'] = 'klass' # ¯\_(ツ)_/¯
+                        logger.error('%s has a field named "class"', m['name'])
+                    if 'uniq_short_name' in msg_short.get(ftype, ''):
+                        ftype = camelCase(msg[field['fullType']]['longName'])
                     if field['label'] == 'repeated':
                         ftype = 'List[%s]' % ftype
                     f.write("  {name}: {ftype}\n".format(ftype=ftype, **field))
@@ -677,7 +712,6 @@ def write_dummy_module():
             for cmd in info['cmds']:
                 write_def(f, msg, msg_short, class_name, cmd)
             f.write('\n')
-    db_check_and_prune()
     db_write()
 
 def main(args):
