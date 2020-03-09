@@ -482,7 +482,10 @@ def db_check_and_prune():
             return
         if used.get(name):
             return
-        used[name] = True
+        if full:
+            used[name] = 'arg'
+        else:
+            used[name] = used.get(name, 'top')
         for field in db['msg'][name].get("fields"):
             mark_used(used, field['fullType'], True)
 
@@ -507,6 +510,8 @@ def db_check_and_prune():
     for m in db['msg'].values():
         if m['fullName'] not in used:
             to_delete.append(m['fullName'])
+        else:
+            m['dependency'] = used[m['fullName']]
     for fullName in to_delete:
         logger.debug('delete unused msg: %s', fullName)
         del db['msg'][fullName]
@@ -514,6 +519,7 @@ def db_check_and_prune():
 def db_create_minimal(db):
     fields = [
         'defaultValue',
+        'dependency',
         'description',
         'doc_msg',
         'extensions',
@@ -665,6 +671,8 @@ def write_dummy_module():
                 f.write("%s = %s\n" % (stype, pytype))
             f.write("\n")
             for m in sorted(msg_short.values(), key=lambda m: m['name']):
+                if m['dependency'] == 'top':
+                    continue
                 set_parent_class(m)
                 m['uniq_short_name'] = m.get('uniq_short_name', m['name'])
                 f.write("class {uniq_short_name}({parent_cls}):\n".format(**m))
