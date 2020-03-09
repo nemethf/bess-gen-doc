@@ -24,12 +24,12 @@ Generate documentation for bess.
 3. Extract documentation from protobuf messages,
 4. Collect modules and their methods by running bessd in a container,
 5. Find method definitions by running gdb,
-6. Write a dummy module (mclass.py).
+6. Write a dummy module (globals.py).
 """
 
 # Uninstall
 #
-# $ docker image rm gen-bess-doc-mclass
+# $ docker image rm gen-bess-doc-globals
 # $ docker image rm nefelinetworks/bess_build
 # $ docker image rm pseudomuto/protoc-gen-doc
 #
@@ -148,10 +148,10 @@ def iterate_proto_files():
         for f in (d/'protobuf').glob('*.proto'):
             yield f
 
-def gen_mclass_info():
-    image = 'gen-bess-doc-mclass'
-    outdir = wdir / 'out-mclass'
-    src_dir = wdir / 'save-mclass-info'
+def gen_globals_info():
+    image = 'gen-bess-doc-globals'
+    outdir = wdir / 'out-globals'
+    src_dir = wdir / 'extract-globals-info'
     outdir.mkdir(exist_ok=True)
 
     # Build the image if it doesn't exist locally
@@ -318,10 +318,10 @@ def create_combined_db():
     set_protobuf_lineno(msg)
     msg_short = { m['name']: m for m in msg.values()}
 
-    with (wdir / 'out-mclass' / 'bessd-mclass.json').open() as f:
-        minfo = json.load(f)
-    for mclass in minfo:
-        class_name = mclass['name']
+    with (wdir / 'out-globals' / 'globals.json').open() as f:
+        bess_globals = json.load(f)
+    for obj in bess_globals:
+        class_name = obj['name']
         cmd_arg = '%s%s' % (class_name, 'Arg')
         if cmd_arg not in msg_short:
             # MPLSPopArg -> MplsPopArg,
@@ -331,10 +331,10 @@ def create_combined_db():
             cmd_arg = to_camel_case(s2)
         cmd_name = '__init__'
         class_msg = msg_short.get(cmd_arg)
-        mclass['definition'] = find_def(class_name, cmd_name, cmd_arg)
-        mclass['examples'] = find_usage_exampe(class_name)
-        mclass['arg'] = cmd_arg
-        for cmd in mclass['cmds']:
+        obj['definition'] = find_def(class_name, cmd_name, cmd_arg)
+        obj['examples'] = find_usage_exampe(class_name)
+        obj['arg'] = cmd_arg
+        for cmd in obj['cmds']:
             r_full = msg_short[cmd['arg']]['fullName']
             r_arg = re.sub(r'Arg$', 'Response', r_full)
             m = msg.get(r_arg)
@@ -343,7 +343,7 @@ def create_combined_db():
                 cmd['return'] = r_arg
             elif cmd['cmd'].startswith('get_'):
                 set_cmd = cmd['cmd'].replace('get_', 'set_')
-                for scmd in mclass['cmds']:
+                for scmd in obj['cmds']:
                     if scmd['cmd'] == set_cmd:
                         r_full = msg_short[scmd['arg']]['fullName']
                         m = msg.get(r_full)
@@ -362,7 +362,7 @@ def create_combined_db():
     global db
     db = {
         'msg': msg,
-        'mclass': minfo,
+        'globals': bess_globals,
     }
     # Write to a temp file, so next steps cloud run even if this step
     # does not run.
@@ -445,7 +445,7 @@ def db_load():
     if db:
         return db
 
-    with (wdir / 'out-combined' / 'mclass.json').open() as f:
+    with (wdir / 'out-combined' / 'globals.json').open() as f:
         db = json.load(f)
     return db
 
@@ -482,8 +482,8 @@ def db_check_and_prune():
                            msg_short[m['name']]['fullName'], m['fullName'])
         msg_short[m['name']] = m
 
-    for mclass in db['mclass']:
-        methods = [mclass] + mclass['cmds']
+    for obj in db['globals']:
+        methods = [obj] + obj['cmds']
         for method in methods:
             mark_used(used, method['arg'])
             mark_used(used, method.get('return'), True)
@@ -555,7 +555,7 @@ def db_create_minimal(db):
     rm_fields(db)
     files = collect_files(db, [])
     f_idx = {fname: i for i, fname in enumerate(sorted(files), start=1)}
-    f_idx['mclass.py'] = 0
+    f_idx['globals.py'] = 0
     index_files(db)
     db['files'] = {v: k for k, v in f_idx.items()}
 
@@ -565,8 +565,8 @@ def db_write(dir_suffix=''):
     outdir = 'out%s' % dir_suffix
     logger.debug('%s', outdir)
     (wdir / outdir).mkdir(exist_ok=True)
-    db_file = wdir/outdir/'mclass.json'
-    db_minimal_file = wdir/outdir/'mclass.min.json.gz'
+    db_file = wdir/outdir/'globals.json'
+    db_minimal_file = wdir/outdir/'globals.min.json.gz'
 
     if not dir_suffix:
         msg_list = [m for _, m in sorted(db['msg'].items())]
@@ -578,7 +578,7 @@ def db_write(dir_suffix=''):
     if dir_suffix:
         return
 
-    # Check the result with: zcat mclass.min.json.gz|python3 -m json.tool
+    # Check the result with: zcat globals.min.json.gz|python3 -m json.tool
     db_min = db_create_minimal(db)
     with gzip.open(str(db_minimal_file), 'wt', encoding='utf8') as f:
         json.dump(db_min, f, sort_keys=True, separators=(',', ':'))
@@ -604,7 +604,7 @@ def write_dummy_module():
     msg = db['msg']
     msg_short = { m['name']: m for m in msg.values()}
     (wdir / 'out').mkdir(exist_ok=True)
-    with (wdir / 'out' / 'mclass.py').open('w') as fobj:
+    with (wdir / 'out' / 'globals.py').open('w') as fobj:
         f = FileWithLineNumber(fobj)
         cfile = 'bess/protobuf/module_msg.proto'
         f.write("# This file is auto-genereated by bess-gen-doc.\n")
@@ -619,6 +619,7 @@ def write_dummy_module():
         ignore = '# type: ignore'
         f.write("\n\n")
         f.write("from pybess.module import Module as BessModule %s\n" % ignore)
+        f.write("from pybess.port import Port %s\n" % ignore)
         f.write("from pybess.bess import BESS %s\n\n" % ignore)
         f.write("bess = BESS()\n\n")
 
@@ -643,7 +644,7 @@ def write_dummy_module():
                     f.write("  pass\n")
                 f.write("\n")
 
-        for info in db['mclass']:
+        for info in sorted(db['globals'], key=lambda i: i['name']):
             class_name = info['name']
             cmd_arg = info['arg']
             doc = [info['help']]
@@ -656,7 +657,8 @@ def write_dummy_module():
                ex = [conv_loc(loc) for loc in info['examples']]
                doc.append('Example usage:\n  %s' % '\n  '.join(ex))
 
-            f.write('class %s(BessModule):\n' % class_name)
+            parent = {'mclass': 'BessModule', 'driver': 'Port'}[info['type']]
+            f.write('class %s(%s):\n' % (class_name, parent))
             info['line'] = f.line
             doc = [d for d in doc if d]
             if doc:
@@ -681,7 +683,7 @@ def main(args):
         update_bess,
         compile_bess,
         run_protoc_gen_doc,
-        gen_mclass_info,
+        gen_globals_info,
         create_combined_db,
         write_dummy_module,
     ]

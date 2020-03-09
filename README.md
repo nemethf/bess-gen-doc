@@ -16,13 +16,13 @@ this program generates documentation that
 1. Extract documentation from protobuf messages,
 1. Collect modules and their methods by running bessd in a container,
 1. Find method definitions by running gdb,
-1. Write a dummy module ([mclass.py](https://github.com/nemethf/pyls-bess/blob/master/pyls_bess/bess_doc/mclass.py)).
+1. Write a dummy module ([globals.py](https://github.com/nemethf/pyls-bess/blob/master/pyls_bess/bess_doc/globals.py)).
 
 # Uninstall
 
 To remove the software, you also need to remove some docker images.
 ```
-$ docker image rm gen-bess-doc-mclass
+$ docker image rm gen-bess-doc-globals
 $ docker image rm nefelinetworks/bess_build
 $ docker image rm pseudomuto/protoc-gen-doc
 ```

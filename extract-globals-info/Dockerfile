@@ -11,4 +11,4 @@ RUN apt-get -q -y update && \
 
 VOLUME ["/out", "/bess", "/bess-gen-doc"]
 
-ENTRYPOINT ["/bess-gen-doc/save-mclass-info"]
+ENTRYPOINT ["/bess-gen-doc/extract-globals-info"]

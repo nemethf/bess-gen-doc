@@ -36,8 +36,21 @@ def main():
         cmds = []
         for cmd, arg in zip(info.cmds, info.cmd_args):
             cmds.append({'cmd': cmd, 'arg': arg})
-        infos.append({'name': info.name, 'help': info.help, 'cmds': cmds})
-    with open('/out/bessd-mclass.json', 'w') as f:
+        infos.append({'type': 'mclass',
+                      'name': info.name, 'help': info.help, 'cmds': cmds})
+    for driver_name in b.list_drivers().driver_names:
+        info = b.get_driver_info(driver_name)
+        cmds = []
+        for cmd in info.commands:
+            # It's a TODO item in bess_msg.proto
+            if cmd:
+                cmds.append({'cmd': cmd})
+
+        infos.append({'type': 'driver',
+                      'name': info.name,
+                      'help': info.help,
+                      'cmds': cmds})
+    with open('/out/globals.json', 'w') as f:
         json.dump(infos, f, indent=2, sort_keys=True, separators=(',', ': '))
 
 
