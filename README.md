@@ -23,6 +23,7 @@ this program generates documentation that
 To remove the software, you also need to remove some docker images.
 ```
 $ docker image rm gen-bess-doc-globals
+$ docker image rm nefelinetworks/bess_build:latest-git
 $ docker image rm nefelinetworks/bess_build
 $ docker image rm pseudomuto/protoc-gen-doc
 ```

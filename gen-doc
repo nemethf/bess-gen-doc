@@ -30,6 +30,7 @@ Generate documentation for bess.
 # Uninstall
 #
 # $ docker image rm gen-bess-doc-globals
+# $ docker image rm nefelinetworks/bess_build:latest-git
 # $ docker image rm nefelinetworks/bess_build
 # $ docker image rm pseudomuto/protoc-gen-doc
 #
@@ -101,8 +102,18 @@ def compile_bess():
             print("If you think it's safe to run, run this command:")
             print(" cp '%s' '%s'" % (bess_dir / build_cmd, safe_version))
             exit(1)
+
+    # We need a new image with git to generate a proper version
+    # string.
+
+    # We must keep the nefelinetworks prefix, because
+    # container_build.py lets us customize only the tag_suffix.
+    build_dir = wdir / 'bess-build'
+    docker_build_image('nefelinetworks/bess_build:latest-git', build_dir)
+
     cmd = [build_cmd, 'bess']
     env = os.environ.copy()
+    env['TAG_SUFFIX'] = '-git'
     env['DEBUG'] = '1'
     env['PATH'] += ':.'
     check_call(cmd, cwd=bess_dir, env=env)
@@ -148,20 +159,20 @@ def iterate_proto_files():
         for f in (d/'protobuf').glob('*.proto'):
             yield f
 
+def docker_build_image(image_name, work_dir):
+    "Build the image if it does not exist."
+    cmd = ['docker', 'images', '-q', image_name]
+    if not subprocess.check_output(cmd):
+        cmd = ['docker', 'build', '-t', image_name, '.']
+        subprocess.run(cmd, cwd=str(work_dir))
+
 def gen_globals_info():
     image = 'gen-bess-doc-globals'
     outdir = wdir / 'out-globals'
     src_dir = wdir / 'extract-globals-info'
     outdir.mkdir(exist_ok=True)
 
-    # Build the image if it doesn't exist locally
-    #
-    # (build in an almost empty dir, otherwise the "build context" is
-    # huge")
-    cmd = ['docker', 'images', '-q', image]
-    if not subprocess.check_output(cmd):
-        cmd = ['docker', 'build', '-t', image, '.']
-        subprocess.run(cmd, cwd=str(src_dir))
+    docker_build_image(image, src_dir)
 
     # Run the image
     cmd = ['docker', 'run', '--rm',
@@ -320,7 +331,7 @@ def create_combined_db():
 
     with (wdir / 'out-globals' / 'globals.json').open() as f:
         bess_globals = json.load(f)
-    for obj in bess_globals:
+    for obj in bess_globals['globals']:
         class_name = obj['name']
         cmd_arg = '%s%s' % (class_name, 'Arg')
         if cmd_arg not in msg_short:
@@ -362,7 +373,8 @@ def create_combined_db():
     global db
     db = {
         'msg': msg,
-        'globals': bess_globals,
+        'globals': bess_globals['globals'],
+        'bess-version': bess_globals['bess-version'],
     }
     # Write to a temp file, so next steps cloud run even if this step
     # does not run.
@@ -659,8 +671,9 @@ def write_dummy_module():
                 if not line.startswith('//'):
                     break
                 f.write(line.replace('//', '#'))
+        f.write("\n\n# Based on bess version: %s\n" % db['bess-version'])
         ignore = '# type: ignore'
-        f.write("\n\n")
+        f.write("\n")
         f.write("from pybess.module import Module as BessModule %s\n" % ignore)
         f.write("from pybess.port import Port %s\n" % ignore)
         f.write("from pybess.bess import BESS %s\n\n" % ignore)

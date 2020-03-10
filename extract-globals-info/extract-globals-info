@@ -17,6 +17,7 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 import json
+import re
 import subprocess
 import sys
 
@@ -30,14 +31,18 @@ def main():
     start_bessd()
     b = bess.BESS()
     b.connect()
-    infos = []
+    globals = []
     for mclass_name in b.list_mclasses().names:
         info = b.get_mclass_info(mclass_name)
         cmds = []
         for cmd, arg in zip(info.cmds, info.cmd_args):
             cmds.append({'cmd': cmd, 'arg': arg})
-        infos.append({'type': 'mclass',
-                      'name': info.name, 'help': info.help, 'cmds': cmds})
+        globals.append({
+            'type': 'mclass',
+            'name': info.name,
+            'help': info.help,
+            'cmds': cmds
+        })
     for driver_name in b.list_drivers().driver_names:
         info = b.get_driver_info(driver_name)
         cmds = []
@@ -46,12 +51,20 @@ def main():
             if cmd:
                 cmds.append({'cmd': cmd})
 
-        infos.append({'type': 'driver',
-                      'name': info.name,
-                      'help': info.help,
-                      'cmds': cmds})
+        globals.append({
+            'type': 'driver',
+            'name': info.name,
+            'help': info.help,
+            'cmds': cmds
+        })
+    match = re.search(r'"(.*)"', str(b.get_version()))
+    if match:
+        version = match.group(1)
+    else:
+        version = 'unknown'
+    db = {'globals': globals, 'bess-version': version}
     with open('/out/globals.json', 'w') as f:
-        json.dump(infos, f, indent=2, sort_keys=True, separators=(',', ': '))
+        json.dump(db, f, indent=2, sort_keys=True, separators=(',', ': '))
 
 
 if __name__ == '__main__':
