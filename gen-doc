@@ -628,7 +628,9 @@ def write_dummy_module():
     db_check_and_prune()
 
     simple_types = {
-        'bytes': 'str',
+        # This doesn't seem to be true for python3
+        # https://github.com/pseudomuto/protoc-gen-doc/blob/a40ad78161f7352e965d7698ea1c9cd7d2f8bbf2/resources/scalars.json#L164
+        # 'bytes': 'str',
         'double': 'float',
         'fixed32': 'int',
         'fixed64': 'int',
