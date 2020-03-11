@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (C) 2018 by Felicián Németh
+# Copyright (C) 2018-2020 by Felicián Németh
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -685,11 +685,12 @@ def write_dummy_module():
             for stype, pytype in sorted(simple_types.items()):
                 f.write("%s = %s\n" % (stype, pytype))
             f.write("\n")
+            for m in msg_short.values():
+                m['uniq_short_name'] = m.get('uniq_short_name', m['name'])
             for m in sorted(msg_short.values(), key=lambda m: m['name']):
                 if m['dependency'] == 'top':
                     continue
                 set_parent_class(m)
-                m['uniq_short_name'] = m.get('uniq_short_name', m['name'])
                 f.write("class {uniq_short_name}({parent_cls}):\n".format(**m))
                 for field in m['fields']:
                     ftype = field['type']
